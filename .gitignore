@@ -1,0 +1,4 @@
+.env
+.venv
+agent_env
+agent_sandbox/
