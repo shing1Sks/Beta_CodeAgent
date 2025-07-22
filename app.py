@@ -12,6 +12,9 @@ os.makedirs(SANDBOX_DIR, exist_ok=True)
 # Initialize Groq client
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
+# Limit chat history length
+MAX_HISTORY_LINES = 20  # last 20 lines of chat history
+
 
 def get_folder_tree(path):
     """Return folder structure."""
@@ -50,8 +53,9 @@ def call_llm(prompt):
     return response.choices[0].message.content.strip()
 
 
-def ask_llm(task, folder_tree, last_output):
-    """Construct LLM prompt."""
+def ask_llm(task, folder_tree, last_output, history):
+    """Construct LLM prompt with chat history."""
+    truncated_history = "\n".join(history[-MAX_HISTORY_LINES:])
     prompt = f"""
 You are an autonomous coding agent that can only run non-interactive terminal commands inside the 'agent_sandbox' directory.
 
@@ -60,15 +64,19 @@ You are an autonomous coding agent that can only run non-interactive terminal co
 2. **Use echo or printf** to create or update files.  
    Example:  
      echo "print('Hello')" > main.py
-3. Always create minimal, functional code in as few commands as possible.
-4. **Do not explain your commands**, only output the command itself.
-5. If the task is done, return `exit` to stop.
+3. Do **NOT** try to run or debug code (e.g., do not run `python file.py` or `node file.js`). Your job is only to create or edit files.
+4. Always create minimal, functional code in as few commands as possible.
+5. **Do not explain your commands**, only output the command itself.
+6. If the task is done, return `exit` to stop.
 
 ### CONTEXT:
 Task: {task}
 
 Current folder structure:
 {folder_tree}
+
+Recent command history:
+{truncated_history}
 
 Last command output:
 {last_output}
@@ -83,8 +91,8 @@ def clean_command(cmd):
     """Remove markdown formatting and extra text."""
     cmd = cmd.strip()
     if cmd.startswith("```"):
-        cmd = cmd.split("```")[1]  # remove first ```
-        cmd = cmd.replace("bash", "").replace("python", "")  # remove language tags
+        cmd = cmd.split("```")[1]
+        cmd = cmd.replace("bash", "").replace("python", "")
     cmd = cmd.replace("```", "").strip()
     return cmd
 
@@ -92,14 +100,22 @@ def clean_command(cmd):
 def main():
     task = input("Enter the coding task for the agent: ")
     last_output = "None"
+    history = []
 
     for step in range(10):  # safety steps
         folder_tree = get_folder_tree(SANDBOX_DIR)
-        command = clean_command(ask_llm(task, folder_tree, last_output))
+        command = clean_command(ask_llm(task, folder_tree, last_output, history))
 
         print(f"\n[Agent Step {step + 1}] Command: {command}")
+        history.append(f"Step {step + 1}: {command}")
+
+        if command.lower() == "exit":
+            print("[Agent]: Task completed.")
+            break
+
         last_output = run_command(command)
         print(f"[Terminal Output]:\n{last_output}")
+        history.append(f"Output: {last_output.strip()}")
 
 
 if __name__ == "__main__":
